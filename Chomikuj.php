@@ -90,6 +90,12 @@ class Chomikuj
   protected $fileInfoCache = array();
 
   /**
+   * @var number $stamp
+   *   Message sequence stamp. We need to increase it for every request.
+   */
+  protected $stamp = 0;
+
+  /**
    * Constructor
    *
    * @param string $userName.
@@ -154,7 +160,6 @@ class Chomikuj
         'POST /services/ChomikBoxService.svc HTTP/1.1',
         'SOAPAction: http://chomikuj.pl/IChomikBoxService/Auth',
         'Content-Type: text/xml;charset=utf-8',
-        'Cookie: guid=453bedfd-7258-4097-bc35-91c5fdf5f0e4',
         'Content-Length: ' . strlen($data),
         'Connection: Keep-Alive',
         'Accept-Language: pl-PL,en,*',
@@ -249,7 +254,7 @@ class Chomikuj
             '<Download xmlns="http://chomikuj.pl/">' .
               '<token>' . $this->authToken . '</token>' .
               '<sequence>' .
-                '<stamp>21621</stamp>' .
+                '<stamp>' . ($this->stamp++) . '</stamp>' .
                 '<part>0</part>' .
                 '<count>1</count>' .
               '</sequence>' .
@@ -266,7 +271,6 @@ class Chomikuj
         'POST /services/ChomikBoxService.svc HTTP/1.1',
         'SOAPAction: http://chomikuj.pl/IChomikBoxService/Download',
         'Content-Type: text/xml;charset=utf-8',
-        'Cookie: guid=453bedfd-7258-4097-bc35-91c5fdf5f0e4',
         'Content-Length: ' . strlen($data),
         'Connection: Keep-Alive',
         'Accept-Language: pl-PL,en,*',
@@ -275,7 +279,7 @@ class Chomikuj
       )
     );
 
-    preg_match_all('/<FileEntry><id>(\d+)<\/id><agreementInfo>.*?<AgreementInfo><name>(.*?)<\/name><cost>\d+<\/cost><\/AgreementInfo>.*?<realId>(.*?)<\/realId>.*?<name>(.*?)<\/name><size>(.*?)<\/size>.*?<\/FileEntry>/', $response, $matches);
+    preg_match_all('/<FileEntry><id>(\d+)<\/id><agreementInfo>.*?<AgreementInfo><name>(.*?)<\/name><cost>(\d+)<\/cost><\/AgreementInfo>.*?<realId>(.*?)<\/realId>.*?<name>(.*?)<\/name><size>(.*?)<\/size>.*?<\/FileEntry>/', $response, $matches);
 
     $numMatches = count ($matches[1]);
 
@@ -283,9 +287,10 @@ class Chomikuj
       $filesInfo[] = $this->fileInfoCache[$matches[1][$i]] = array(
         'id' => $matches[1][$i],
         'agreement' => $matches[2][$i],
-        'realId' => $matches[3][$i],
-        'name' => $matches[4][$i],
-        'size' => $matches[5][$i],
+        'cost' => $matches[3][$i],
+        'realId' => $matches[4][$i],
+        'name' => $matches[5][$i],
+        'size' => $matches[6][$i],
       );
     }
 
@@ -326,272 +331,287 @@ class Chomikuj
     // Loading files information.
     $filesInfo = $this->downloadFilesInformation($urls, $recursive);
 
-    /**
-     * Requesting information about files.
-     */
+    // Maximum of 10 files per request.
+    for ($iteration = 0; $iteration < count($filesInfo) / 10; ++$iteration) {
 
-    $entries    = '';
-    $numEntries = 0;
+      /**
+       * Requesting information about files.
+       */
 
-    foreach ($filesInfo as $index => $fileInfo) {
-      $entries .=
-        '<DownloadReqEntry>' .
-          '<id>' . $fileInfo['id'] . '</id>' .
-          '<agreementInfo>' .
-            '<AgreementInfo><name>' . $fileInfo['agreement'] . '</name></AgreementInfo>' .
-          '</agreementInfo>' .
-        '</DownloadReqEntry>';
+      $entries    = '';
+      $numEntries = 0;
 
-      ++$numEntries;
-    };
+      foreach (array_slice($filesInfo, $iteration * 10, 10) as $index => $fileInfo) {
+        $entries .=
+          '<DownloadReqEntry>' .
+            '<id>' . $fileInfo['id'] . '</id>' .
+            '<agreementInfo>' .
+              '<AgreementInfo><name>' . $fileInfo['agreement'] . '</name>';
 
-    $response = $this->request(
+        if ($fileInfo['cost'] > 0) {
+          $entries .= '<cost>' . $fileInfo['cost'] . '</cost>';
+        }
 
-      // URL
-      'http://box.chomikuj.pl/services/ChomikBoxService.svc',
+        $entries .=
+              '</AgreementInfo>' .
+            '</agreementInfo>' .
+          '</DownloadReqEntry>';
 
-      // GET params.
-      array(),
+        ++$numEntries;
 
-      // Method
-      'POST',
+        if ($numEntries > 10)
+          break;
+      };
 
-      // Request data
-      $data =
-        '<?xml version="1.0" encoding="UTF-8"?>' .
-        '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' .
-          '<s:Body>' .
-            '<Download xmlns="http://chomikuj.pl/">' .
-              '<token>' . $this->authToken . '</token>' .
-              '<sequence>' .
-                '<stamp>27033</stamp>' .
-                '<part>0</part>' .
-                '<count>1</count>' .
-              '</sequence>' .
-              '<disposition>download</disposition>' .
-              '<list>' .
-                $entries .
-              '</list>' .
-            '</Download>' .
-          '</s:Body>' .
-        '</s:Envelope>',
+      $response = $this->request(
 
-      // Headers.
-      array(
-        'POST /services/ChomikBoxService.svc HTTP/1.1',
-        'SOAPAction: http://chomikuj.pl/IChomikBoxService/Download',
-        'Content-Type: text/xml;charset=utf-8',
-        'Cookie: guid=453bedfd-7258-4097-bc35-91c5fdf5f0e4',
-        'Content-Length: ' . strlen($data),
+        // URL
+        'http://box.chomikuj.pl/services/ChomikBoxService.svc',
+
+        // GET params.
+        array(),
+
+        // Method
+        'POST',
+
+        // Request data
+        $data =
+          '<?xml version="1.0" encoding="UTF-8"?>' .
+          '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' .
+            '<s:Body>' .
+              '<Download xmlns="http://chomikuj.pl/">' .
+                '<token>' . $this->authToken . '</token>' .
+                '<sequence>' .
+                  '<stamp>' . ($this->stamp++) . '</stamp>' .
+                  '<part>0</part>' .
+                  '<count>1</count>' .
+                '</sequence>' .
+                '<disposition>download</disposition>' .
+                '<list>' .
+                  $entries .
+                '</list>' .
+              '</Download>' .
+            '</s:Body>' .
+          '</s:Envelope>',
+
+        // Headers.
+        array(
+          'POST /services/ChomikBoxService.svc HTTP/1.1',
+          'SOAPAction: http://chomikuj.pl/IChomikBoxService/Download',
+          'Content-Type: text/xml;charset=utf-8',
+          'Content-Length: ' . strlen($data),
+          'Connection: Keep-Alive',
+          'Accept-Language: pl-PL,en,*',
+          'User-Agent: Mozilla/5.0',
+          'Host: box.chomikuj.pl',
+        )
+      );
+
+      preg_match_all('/<globalId>(.*?)<\/globalId>/', $response, $matches);
+
+      $path = @substr($matches[1][0], 1);
+
+      // Removing non-ascii characters.
+      $path = preg_replace('/[^(\x20-\x7F)]*/', '', $path);
+
+      preg_match_all('/<FileEntry>.*?<id>(.*?)<\/id>.*?<realId>(.*?)<\/realId>.*?<name>(.*?)<\/name><size>(.*?)<\/size>.*?(<url i:nil="true"\/>|<url>(.*?)<\/url>).*?<\/FileEntry>/', $response, $matches);
+
+
+      $numMatches = count ($matches[1]);
+      $files      = array();
+
+      for ($i = 0; $i < $numMatches; ++$i) {
+        $name       = $matches[3][$i];
+        $ext        = pathinfo($name, PATHINFO_EXTENSION);
+
+        if (!empty($extensions) && !in_array($ext, $extensions)) {
+          // Skipping file.
+          continue;
+        }
+
+        $files[] = array(
+          'name' => $name,
+          'size' => $matches[4][$i],
+          'url' => htmlspecialchars_decode($matches[6][$i]),
+          'destination' => $destinationFolder . '/' . ($structure ? ($path . '/') : '') . $name,
+          'path' => $path,
+        );
+      }
+
+      /**
+       * Downloading files.
+       */
+
+      $curl = curl_init();
+
+      curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+        'Icy-MetaData: 1',
         'Connection: Keep-Alive',
         'Accept-Language: pl-PL,en,*',
         'User-Agent: Mozilla/5.0',
-        'Host: box.chomikuj.pl',
-      )
-    );
+      ));
 
-    preg_match_all('/<globalId>(.*?)<\/globalId>/', $response, $matches);
+      curl_setopt($curl, CURLOPT_FOLLOWLOCATION, 1);
+      curl_setopt($curl, CURLOPT_CUSTOMREQUEST, "GET");
 
-    $path = @substr($matches[1][0], 1);
 
-    // Removing non-ascii characters.
-    $path = preg_replace('/[^(\x20-\x7F)]*/', '', $path);
+      foreach ($files as $file) {
 
-    preg_match_all('/<FileEntry>.*?<id>(.*?)<\/id>.*?<realId>(.*?)<\/realId>.*?<name>(.*?)<\/name><size>(.*?)<\/size>.*?<url>(.*?)<\/url>.*?<\/FileEntry>/', $response, $matches);
+        if (php_sapi_name() === 'cli') {
 
-    $numMatches = count ($matches[1]);
-    $files      = array();
+          $url_limited = strlen($file['url']) > 80 ? (substr($file['url'], 0, 20) . '...' . substr($file['url'], -60)) : $file['url'];
 
-    for ($i = 0; $i < $numMatches; ++$i) {
-      $name       = $matches[3][$i];
-      $ext        = pathinfo($name, PATHINFO_EXTENSION);
-
-      if (!empty($extensions) && !in_array($ext, $extensions)) {
-        // Skipping file.
-        continue;
-      }
-
-      $files[] = array(
-        'name' => $name,
-        'size' => $matches[4][$i],
-        'url' => htmlspecialchars_decode($matches[5][$i]),
-        'destination' => $destinationFolder . '/' . ($structure ? ($path . '/') : '') . $name,
-        'path' => $path,
-      );
-    }
-
-    /**
-     * Downloading files.
-     */
-
-    $curl = curl_init();
-
-    curl_setopt($curl, CURLOPT_HTTPHEADER, array(
-      'Icy-MetaData: 1',
-      'Connection: Keep-Alive',
-      'Accept-Language: pl-PL,en,*',
-      'User-Agent: Mozilla/5.0',
-    ));
-
-    curl_setopt($curl, CURLOPT_FOLLOWLOCATION, 1);
-    curl_setopt($curl, CURLOPT_CUSTOMREQUEST, "GET");
-
-    foreach ($files as $file) {
-
-      if (php_sapi_name() === 'cli') {
-
-        $url_limited = strlen($file['url']) > 80 ? (substr($file['url'], 0, 20) . '...' . substr($file['url'], -60)) : $file['url'];
-
-        echo "Downloading URL \"{$url_limited}\" ({$file['size']} bytes). ";
-      }
-
-      curl_setopt($curl, CURLOPT_URL, $file['url']);
-
-      if ($structure) {
-        @mkdir(dirname($file['destination']), 0777, true);
-      }
-
-      if (file_exists($file['destination'])) {
-
-        if ($structure && !$overwrite) {
-          // Creating new file has no sense.
-
-          if (php_sapi_name() === 'cli')
-            echo "Already downloaded, skipping.\n";
-
-          continue;
+          echo "Downloading URL \"{$url_limited}\" ({$file['size']} bytes). ";
         }
 
-        if ($overwrite) {
-          // Removing destination file.
+        curl_setopt($curl, CURLOPT_URL, $file['url']);
+
+        if ($structure) {
+          @mkdir(dirname($file['destination']), 0777, true);
+        }
+
+        if (file_exists($file['destination'])) {
+
+          if ($structure && !$overwrite) {
+            // Creating new file has no sense.
+
+            if (php_sapi_name() === 'cli')
+              echo "Already downloaded, skipping.\n";
+
+            continue;
+          }
+
+          if ($overwrite) {
+            // Removing destination file.
+
+            if (php_sapi_name() === 'cli')
+              echo "Will Overwrite. ";
+
+            unlink($file['destination']);
+          }
+          else {
+            // Generating better name.
+            $path = $file['destination'];
+
+            do {
+              $file_name = pathinfo($path, PATHINFO_FILENAME);
+
+              preg_match('/\((\d+)\)$/', $file_name, $matches);
+
+              if (@is_numeric($matches[1])) {
+                // Incrementing value in "(...)".
+                $number = $matches[1] + 1;
+
+                // Removing "(...)" from the end of file name.
+                $file_name = substr($file_name, 0, strlen($file_name) - strlen($number) - 2);
+              }
+              else {
+                // Starting from "...(2)".
+                $number = 2;
+              }
+
+              $ext  = pathinfo($path, PATHINFO_EXTENSION);
+
+              // Constructing file path as "filename(NUMBER).ext".
+              $path =
+                pathinfo($path, PATHINFO_DIRNAME) . '/' .
+                $file_name . '(' . $number . ')' .
+                ($ext ? ('.' . $ext) : '');
+
+              // If file path already exist, we will need to generate another path.
+            } while (file_exists($path));
+
+            $file['destination'] = $path;
+          }
+        }
+
+        if (file_exists($file['destination'] . '.part')) {
+          // File is not complete.
+
+          $fileSize = filesize($file['destination'] . '.part');
+
+          if ($fileSize < $file['size']) {
+            // Destination file already exist and is not fully downloaded, resuming download.
+          	curl_setopt($curl, CURLOPT_RANGE, $fileSize . "-");
+
+          	if (php_sapi_name() === 'cli')
+              echo "Resuming part $fileSize - {$file['size']}... ";
+
+          	$fileHandle = fopen($file['destination'] . '.part', "a");
+          }
+          else {
+            // Destination file is already fully downloaded, renaming and going to the next file.
+
+            if (php_sapi_name() === 'cli')
+              echo "Already downloaded, skipping.\n";
+
+            // Removing ".part" from file name.
+            rename($file['destination'] . '.part', $file['destination']);
+
+            continue;
+          }
+        }
+        else {
+          // Starting download.
+          curl_setopt($curl, CURLOPT_RANGE, '0-');
+
+          @$fileHandle = fopen($file['destination'] . '.part', "a");
 
           if (php_sapi_name() === 'cli')
-            echo "Will Overwrite. ";
+            echo "Starting... ";
+        }
 
+        if (!$fileHandle) {
+          // Could not open handle
+
+          echo "ERROR.\n";
+          fwrite(STDERR, "Could not create file \"{$file['destination']}\" for chomikbox file download, exiting.");
+
+        	return FALSE;
+        }
+
+        curl_setopt($curl, CURLOPT_BINARYTRANSFER, 1);
+        curl_setopt($curl, CURLOPT_FILE, $fileHandle);
+
+        $result    = curl_exec($curl);
+        $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+
+        fclose ($fileHandle);
+
+        if ($http_code == 404) {
+          // We don't need zero-sized file.
           unlink($file['destination']);
         }
         else {
-          // Generating better name.
-          $path = $file['destination'];
-
-          do {
-            $file_name = pathinfo($path, PATHINFO_FILENAME);
-
-            preg_match('/\((\d+)\)$/', $file_name, $matches);
-
-            if (@is_numeric($matches[1])) {
-              // Incrementing value in "(...)".
-              $number = $matches[1] + 1;
-
-              // Removing "(...)" from the end of file name.
-              $file_name = substr($file_name, 0, strlen($file_name) - strlen($number) - 2);
-            }
-            else {
-              // Starting from "...(2)".
-              $number = 2;
-            }
-
-            $ext  = pathinfo($path, PATHINFO_EXTENSION);
-
-            // Constructing file path as "filename(NUMBER).ext".
-            $path =
-              pathinfo($path, PATHINFO_DIRNAME) . '/' .
-              $file_name . '(' . $number . ')' .
-              ($ext ? ('.' . $ext) : '');
-
-            // If file path already exist, we will need to generate another path.
-          } while (file_exists($path));
-
-          $file['destination'] = $path;
-        }
-      }
-
-      if (file_exists($file['destination'] . '.part')) {
-        // File is not complete.
-
-        $fileSize = filesize($file['destination'] . '.part');
-
-        if ($fileSize < $file['size']) {
-          // Destination file already exist and is not fully downloaded, resuming download.
-        	curl_setopt($curl, CURLOPT_RANGE, $fileSize . "-");
-
-        	if (php_sapi_name() === 'cli')
-            echo "Resuming part $fileSize - {$file['size']}... ";
-
-        	$fileHandle = fopen($file['destination'] . '.part', "a");
-        }
-        else {
-          // Destination file is already fully downloaded, renaming and going to the next file.
-
-          if (php_sapi_name() === 'cli')
-            echo "Already downloaded, skipping.\n";
-
           // Removing ".part" from file name.
           rename($file['destination'] . '.part', $file['destination']);
-
-          continue;
         }
-      }
-      else {
-        // Starting download.
-        curl_setopt($curl, CURLOPT_RANGE, '0-');
-
-        @$fileHandle = fopen($file['destination'] . '.part', "a");
 
         if (php_sapi_name() === 'cli')
-          echo "Starting... ";
+          echo "Done.\n";
       }
 
-      if (!$fileHandle) {
-        // Could not open handle
+      curl_close($curl);
 
-        echo "ERROR.\n";
-        fwrite(STDERR, "Could not create file \"{$file['destination']}\" for chomikbox file download, exiting.");
+      if ($recursive) {
+        // We will try to download subfolders.
+        foreach ($urls as $url) {
+          $response = $this->request($url, array(), 'GET', '', array());
 
-      	return FALSE;
-      }
+          // Searching for folder names.
+          preg_match_all('/<div id="foldersList">(.*?)<\/div>/sm', $response, $matches);
 
-      curl_setopt($curl, CURLOPT_BINARYTRANSFER, 1);
-      curl_setopt($curl, CURLOPT_FILE, $fileHandle);
+          if (@$matches[0][0]) {
+            // We have some folders.
+            preg_match_all('/href="(.*?)"/sm', $matches[0][0], $matches);
 
-      $result    = curl_exec($curl);
-      $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            foreach ($matches[1] as &$match) {
+              $match = 'http://chomikuj.pl' . $match;
+            }
 
-      fclose ($fileHandle);
-
-      if ($http_code == 404) {
-        // We don't need zero-sized file.
-        unlink($file['destination']);
-      }
-      else {
-        // Removing ".part" from file name.
-        rename($file['destination'] . '.part', $file['destination']);
-      }
-
-      if (php_sapi_name() === 'cli')
-        echo "Done.\n";
-    }
-
-    curl_close($curl);
-
-    if ($recursive) {
-      // We will try to download subfolders.
-      foreach ($urls as $url) {
-        $response = $this->request($url, array(), 'GET', '', array());
-
-        // Searching for folder names.
-        preg_match_all('/<div id="foldersList">(.*?)<\/div>/sm', $response, $matches);
-
-        if (@$matches[0][0]) {
-          // We have some folders.
-          preg_match_all('/href="(.*?)"/sm', $matches[0][0], $matches);
-
-          foreach ($matches[1] as &$match) {
-            $match = 'http://chomikuj.pl' . $match;
+            // Downloading subfolders' files.
+            $this->downloadFiles($matches[1], $extensions, $destinationFolder, $recursive, $structure, $overwrite);
           }
-
-          // Downloading subfolders' files.
-          $this->downloadFiles($matches[1], $extensions, $destinationFolder, $recursive, $structure, $overwrite);
         }
       }
     }
@@ -617,7 +637,7 @@ class Chomikuj
    * @param array $headers
    *   Custom HTTP headers.
    */
-  public function request ($url, $params, $method = 'POST', $data = "", $headers) {
+  public function request ($url, $params, $method = 'POST', $data = "", $headers = array()) {
 
     $curl = curl_init($url);
 
@@ -639,6 +659,12 @@ class Chomikuj
     $result = curl_exec($curl);
 
     curl_close($curl);
+
+    preg_match('/<a:messageSequence><stamp>(\d+)<\/stamp>/', $result, $matches);
+
+    if (!empty($matches[1])) {
+      $this->stamp = $matches[1] + 1000;
+    }
 
     return $result;
   }
@@ -688,7 +714,7 @@ if (php_sapi_name() === 'cli') {
   if (empty($args) || !empty($args['help']) || empty($args['user']) || (empty($args['password']) && empty($args['hash'])) || empty($args['url'])) {
     echo
       "\nChomikuj Downloader\nVersion 0.1\n\nUsage:\n" .
-      "  php " . $argv[0] . " -u USER -p PASSWORD -url \"http://chomikuj.pl/PATH\" [optional options] destination\n\n" .
+      "  php " . $argv[0] . " -u USER -p PASSWORD --url=\"http://chomikuj.pl/PATH\" [optional options] destination\n\n" .
       "Required Options:\n" .
       "  --user=USER          Uses specified user name for authentication.\n" .
       "  --password=PASSWORD  Uses specified user password for authentication.\n" .
@@ -700,8 +726,13 @@ if (php_sapi_name() === 'cli') {
       "  -s, --structure      Creates full folder structure.\n" .
       "  -o, --overwrite      Overwrites existing files.\n" .
       "  -h, --help, /?       Shows this help.\n\n" .
+      "NOTE:\n" .
+      "  - To log in you may use password OR hash.\n" .
+      "  - URLs must start with \"http://chomikuj.pl/\" and must NOT end with a slash.\n" .
+      "  - By default the script downloads files into the folder from where it was run.\n\n" .
       "Examples:\n" .
-      "  php " . $argv[0] . " --user=chomikoryba --password=ryba123 --url=\"http://chomikuj.pl/chomikoryba\" -r -s --ext=\"ttf,otf\" downloads\n" .
+      "  php " . $argv[0] . " --user=chomikoryba --password=ryba123 --url=\"http://chomikuj.pl/chomikoryba\" -r -s downloads\n" .
+      "  php " . $argv[0] . " --user=chomikoryba --hash=233b5774ada09b36458f69a04c9718e9 --url=\"http://chomikuj.pl/chomikoryba/Myriad+Pro+%28CE%29-TTF\" -r --ext=\"ttf,otf\" fonts\n" .
       "\n";
 
     exit;
