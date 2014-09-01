@@ -759,7 +759,8 @@ if (php_sapi_name() === 'cli') {
   if (empty($args) || !empty($args['help']) || empty($args['user']) || (empty($args['password']) && empty($args['hash'])) || empty($args['url'])) {
     echo
       "\nChomikuj Downloader\nVersion 0.1\n\nUsage:\n" .
-      "  php " . $argv[0] . " -u USER -p PASSWORD --url=\"http://chomikuj.pl/PATH\" [optional options] destination\n\n" .
+      "  php " . $argv[0] . " --user=USER --password=PASSWORD --url=\"http://chomikuj.pl/PATH\" [optional options] destination\n" .
+      "  php " . $argv[0] . " --user=USER --hash=MD5_PASSWORD --url=\"http://chomikuj.pl/PATH\" [optional options] destination\n\n" .
       "Required Options:\n" .
       "  --user=USER          Uses specified user name for authentication.\n" .
       "  --password=PASSWORD  Uses specified user password for authentication.\n" .
