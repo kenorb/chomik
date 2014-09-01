@@ -6,7 +6,7 @@ Scripts for downloading files from chomikuj.pl
 Usage
 =====
 
-    php Chomikuj.php -u USER -p PASSWORD --url="http://chomikuj.pl/PATH" [optional options] destination
+    php chomik.php -u USER -p PASSWORD --url="http://chomikuj.pl/PATH" [optional options] destination
 
     Required Options:
       --user=USER          Uses specified user name for authentication.
@@ -27,5 +27,5 @@ Usage
       - By default the script downloads files into the folder from where it was run.
 
     Examples:
-      php Chomikuj.php --user=chomikoryba --password=ryba123 --url="http://chomikuj.pl/chomikoryba" -r -s downloads
-      php Chomikuj.php --user=chomikoryba --hash=233b5774ada09b36458f69a04c9718e9 --url="http://chomikuj.pl/chomikoryba/Myriad+Pro+%28CE%29-TTF" -r --ext="ttf,otf" fonts
+      php chomik.php --user=chomikoryba --password=ryba123 --url="http://chomikuj.pl/chomikoryba" -r -s downloads
+      php chomik.php --user=chomikoryba --hash=233b5774ada09b36458f69a04c9718e9 --url="http://chomikuj.pl/chomikoryba/Myriad+Pro+%28CE%29-TTF" -r --ext="ttf,otf" fonts
