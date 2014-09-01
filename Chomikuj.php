@@ -205,10 +205,23 @@ class Chomikuj
     // Cannot login, nothing to do.
       return FALSE;
 
+    if (php_sapi_name() === 'cli') {
+      echo "  Downloading files information for specified URLs:\n";
+
+      foreach ($urls as $url) {
+        echo "    - $url\n";
+      }
+    }
+
     $filesInfo  = array();
 
     foreach ($urls as $index => &$url) {
       if (count($urls) > 1 && pathinfo($url, PATHINFO_EXTENSION) == '') {
+
+        if (php_sapi_name() === 'cli') {
+          echo "      It's a folder, merging its content\n";
+        }
+
         // Folders are downloaded individually.
         $filesInfo = array_merge($filesInfo, $this->downloadFilesInformation(array($url), $recursive));
         $url       = NULL;
@@ -218,6 +231,10 @@ class Chomikuj
     /**
      * Requesting information about files.
      */
+
+    if (php_sapi_name() === 'cli') {
+      echo "  Preparing request to get information about files...";
+    }
 
     $entries    = '';
     $numEntries = 0;
@@ -233,7 +250,11 @@ class Chomikuj
         '</DownloadReqEntry>';
 
       ++$numEntries;
-    };
+    }
+
+    if (php_sapi_name() === 'cli') {
+      echo " OK.\n";
+    }
 
     $response = $this->request(
 
@@ -283,6 +304,10 @@ class Chomikuj
 
     $numMatches = count ($matches[1]);
 
+    if (php_sapi_name() === 'cli') {
+      echo "  Received $numMatches records with information about files.\n";
+    }
+
     for ($i = 0; $i < $numMatches; ++$i) {
       $filesInfo[] = $this->fileInfoCache[$matches[1][$i]] = array(
         'id' => $matches[1][$i],
@@ -322,7 +347,13 @@ class Chomikuj
 
     if (empty($urls))
     // Nothing to do.
+    {
+      if (php_sapi_name() === 'cli') {
+        echo "  No URLs given to download.\n";
+      }
+
       return TRUE;
+    }
 
     if (!$this->login())
     // Cannot login, nothing to do.
@@ -331,8 +362,14 @@ class Chomikuj
     // Loading files information.
     $filesInfo = $this->downloadFilesInformation($urls, $recursive);
 
-    // Maximum of 10 files per request.
-    for ($iteration = 0; $iteration < count($filesInfo) / 10; ++$iteration) {
+    $iterationSize = 1;
+
+    // Maximum of $iterationSize files per request.
+    for ($iteration = 0; $iteration < count($filesInfo) / $iterationSize; ++$iteration) {
+
+      if (php_sapi_name() === 'cli') {
+        echo "  Download iteration " . ($iteration + 1) . " / " . (int) count($filesInfo) / $iterationSize . "\n";
+      }
 
       /**
        * Requesting information about files.
@@ -341,14 +378,14 @@ class Chomikuj
       $entries    = '';
       $numEntries = 0;
 
-      foreach (array_slice($filesInfo, $iteration * 10, 10) as $index => $fileInfo) {
+      foreach (array_slice($filesInfo, $iteration * $iterationSize, $iterationSize) as $index => $fileInfo) {
         $entries .=
           '<DownloadReqEntry>' .
             '<id>' . $fileInfo['id'] . '</id>' .
             '<agreementInfo>' .
               '<AgreementInfo><name>' . $fileInfo['agreement'] . '</name>';
 
-        if ($fileInfo['cost'] > 0) {
+        if ($fileInfo['agreement'] !== 'small') {
           $entries .= '<cost>' . $fileInfo['cost'] . '</cost>';
         }
 
@@ -359,9 +396,9 @@ class Chomikuj
 
         ++$numEntries;
 
-        if ($numEntries > 10)
+        if ($numEntries > $iterationSize)
           break;
-      };
+      }
 
       $response = $this->request(
 
@@ -422,6 +459,7 @@ class Chomikuj
 
       for ($i = 0; $i < $numMatches; ++$i) {
         $name       = $matches[3][$i];
+
         $ext        = pathinfo($name, PATHINFO_EXTENSION);
 
         if (!empty($extensions) && !in_array($ext, $extensions)) {
@@ -466,7 +504,7 @@ class Chomikuj
 
         curl_setopt($curl, CURLOPT_URL, $file['url']);
 
-        if ($structure) {
+        if ($structure && !file_exists(dirname($file['destination']))) {
           @mkdir(dirname($file['destination']), 0777, true);
         }
 
@@ -475,8 +513,9 @@ class Chomikuj
           if ($structure && !$overwrite) {
             // Creating new file has no sense.
 
-            if (php_sapi_name() === 'cli')
+            if (php_sapi_name() === 'cli') {
               echo "Already downloaded, skipping.\n";
+            }
 
             continue;
           }
@@ -532,12 +571,12 @@ class Chomikuj
 
           if ($fileSize < $file['size']) {
             // Destination file already exist and is not fully downloaded, resuming download.
-          	curl_setopt($curl, CURLOPT_RANGE, $fileSize . "-");
+            curl_setopt($curl, CURLOPT_RANGE, $fileSize . "-");
 
-          	if (php_sapi_name() === 'cli')
+            if (php_sapi_name() === 'cli')
               echo "Resuming part $fileSize - {$file['size']}... ";
 
-          	$fileHandle = fopen($file['destination'] . '.part', "a");
+            $fileHandle = fopen($file['destination'] . '.part', "a");
           }
           else {
             // Destination file is already fully downloaded, renaming and going to the next file.
@@ -567,7 +606,7 @@ class Chomikuj
           echo "ERROR.\n";
           fwrite(STDERR, "Could not create file \"{$file['destination']}\" for chomikbox file download, exiting.");
 
-        	return FALSE;
+          return FALSE;
         }
 
         curl_setopt($curl, CURLOPT_BINARYTRANSFER, 1);
@@ -592,26 +631,31 @@ class Chomikuj
       }
 
       curl_close($curl);
+    }
 
-      if ($recursive) {
-        // We will try to download subfolders.
-        foreach ($urls as $url) {
-          $response = $this->request($url, array(), 'GET', '', array());
+    if ($recursive) {
 
-          // Searching for folder names.
-          preg_match_all('/<div id="foldersList">(.*?)<\/div>/sm', $response, $matches);
+      if (php_sapi_name() === 'cli') {
+        echo "  Recursing into given URLs...\n";
+      }
 
-          if (@$matches[0][0]) {
-            // We have some folders.
-            preg_match_all('/href="(.*?)"/sm', $matches[0][0], $matches);
+      // We will try to download subfolders.
+      foreach ($urls as $url) {
+        $response = $this->request($url, array(), 'GET', '', array());
 
-            foreach ($matches[1] as &$match) {
-              $match = 'http://chomikuj.pl' . $match;
-            }
+        // Searching for folder names.
+        preg_match_all('/<div id="foldersList">(.*?)<\/div>/sm', $response, $matches);
 
-            // Downloading subfolders' files.
-            $this->downloadFiles($matches[1], $extensions, $destinationFolder, $recursive, $structure, $overwrite);
+        if (@$matches[0][0]) {
+          // We have some folders.
+          preg_match_all('/href="(.*?)"/sm', $matches[0][0], $matches);
+
+          foreach ($matches[1] as &$match) {
+            $match = 'http://chomikuj.pl' . $match;
           }
+
+          // Downloading subfolders' files.
+          $this->downloadFiles($matches[1], $extensions, $destinationFolder, $recursive, $structure, $overwrite);
         }
       }
     }
@@ -697,19 +741,19 @@ if (php_sapi_name() === 'cli') {
   $args = parseArgs($argv);
 
   if (empty($args['recursive']))
-    $args['recursive'] = @$args['r'];
+    $args['recursive'] = isset($args['r']) ? $args['r'] : FALSE;
 
   if (empty($args['structure']))
-    $args['structure'] = @$args['s'];
+    $args['structure'] = isset($args['s']) ? $args['s'] : FALSE;
 
   if (empty($args['overwrite']))
-    $args['overwrite'] = @$args['o'];
+    $args['overwrite'] = isset($args['o']) ? $args['o'] : FALSE;
 
   if (empty($args['help']))
-    $args['help']      = @$args['h'];
+    $args['help']      = isset($args['h']) ? $args['h'] : FALSE;
 
   if (empty($args['help']))
-    $args['help']      = @$args['/?'];
+    $args['help']      = in_array('/?', $args, TRUE);
 
   if (empty($args) || !empty($args['help']) || empty($args['user']) || (empty($args['password']) && empty($args['hash'])) || empty($args['url'])) {
     echo
@@ -759,7 +803,7 @@ if (php_sapi_name() === 'cli') {
     array($args['url']),
 
     // File extensions to include.
-    @$args['ext'] ? (explode(',', $args['ext'])) : array(),
+    isset($args['ext']) ? (explode(',', $args['ext'])) : array(),
 
     // Destination folder.
     $args[0],
