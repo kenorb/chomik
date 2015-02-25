@@ -169,6 +169,11 @@ class Chomikuj
       )
     );
 
+    if (!$response) {
+      // If response fails, it indicates probably some temporary network issue.
+      return FALSE;
+    }
+
     preg_match('/\<a:token\>(.*?)\<\/a:token\>/', $response, $matches);
 
     $this->authToken      = @$matches[1];
@@ -341,10 +346,13 @@ class Chomikuj
    * @param boolean $overwrite
    *   True to overwrite existing files.
    *
+   * @param array $args
+   *   Pass original arguments.
+   *
    * @return boolean
    *   True if sucessfully downloaded all files.
    */
-  public function downloadFiles ($urls, $extensions = array(), $destinationFolder = '', $recursive = TRUE, $structure = TRUE, $overwrite = FALSE) {
+  public function downloadFiles ($urls, $extensions = array(), $destinationFolder = '', $recursive = TRUE, $structure = TRUE, $overwrite = FALSE, $args = array()) {
 
     if (empty($urls))
     // Nothing to do.
@@ -460,11 +468,18 @@ class Chomikuj
 
       for ($i = 0; $i < $numMatches; ++$i) {
         $name       = $matches[3][$i];
-
         $ext        = pathinfo($name, PATHINFO_EXTENSION);
+        $size       = $matches[4][$i];
 
         if (!empty($extensions) && !in_array($ext, $extensions)) {
+          php_sapi_name() === 'cli' ? print "Skipping file ($name), because of extension ($ext).\n" : NULL;
           // Skipping file.
+          continue;
+        }
+        
+        if (!empty($args['max-size']) && $size > $args['max-size']) {
+          // Skipping file.
+          php_sapi_name() === 'cli' ? print "Skipping file ($name), because of size limit ($size).\n" : NULL;
           continue;
         }
 
@@ -598,7 +613,7 @@ class Chomikuj
           @$fileHandle = fopen($file['destination'] . '.part', "a");
 
           if (php_sapi_name() === 'cli')
-            echo "Starting... ";
+            echo "Downloading... ";
         }
 
         if (!$fileHandle) {
@@ -767,10 +782,11 @@ if (php_sapi_name() === 'cli') {
       "  --hash=HASH          Uses specified user password hash for authentication.\n" .
       "  --url=URL            Downloads files from the specified URL.\n\n" .
       "Optional Options:\n" .
-      "  --ext=EXTENSIONS     Downloads only files of the specified extensions, separated by comma.\n" .
       "  -r, --recursive      Downloads also all subdirectories.\n" .
       "  -s, --structure      Creates full folder structure.\n" .
       "  -o, --overwrite      Overwrites existing files.\n" .
+      "  --ext=EXTENSIONS     Downloads files only with the specified extensions, separated by comma.\n" .
+      "  --max-limit=SIZE     Do not download files with size greater than specified max (in bytes).\n" .
       "  -h, --help, /?       Shows this help.\n\n" .
       "NOTE:\n" .
       "  - To log in you may use password OR hash.\n" .
@@ -817,6 +833,9 @@ if (php_sapi_name() === 'cli') {
     !empty($args['structure']),
 
     // Overwrite existing files.
-    !empty($args['overwrite'])
+    !empty($args['overwrite']),
+
+    // Pass original arguments.
+    $args
   );
 }
