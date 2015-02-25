@@ -12,19 +12,14 @@
  * Example:
  * <code>
  * <?php
- *   $chomikuj = new Chomikuj(
- *
- *     // Chomikuj user name.
- *     'username',
- *
- *     // Chomikuj user password or MD5-hashed password.
- *     'password_or_hash',
- *
- *     // Boolean indicating whether specified password is a MD5 version of password(used to prevent showin password in
- *     // plain text).
- *     FALSE,
- *
+ *   $args = array(
+ *     'user' => 'username', // Chomikuj user name.
+ *     'hash' => 'MD5HASH',  // Chomikuj user MD5-hashed password.
+ *     'recursive' => TRUE,  // Recurse into subdirectories.
+ *     'structure' => TRUE,  // Create folder structure.
+ *     'overwrite' => FALSE, // Overwrite existing files.
  *   );
+ *   $chomikuj = new Chomikuj($args);
  *
  *   $chomikuj->downloadFiles(
  *
@@ -32,9 +27,6 @@
  *     array(
  *       'http://chomikuj.pl/chomikoryba',
  *     ),
- *
- *     // Optional. File extensions to include. Defaults to all extensions (array()).
- *     array('pdf', 'docx'),
  *
  *     // Optional. Destination folder. May be empty. Defaults to current directory.
  *     'downloads',
@@ -97,20 +89,32 @@ class Chomikuj
   protected $stamp = 0;
 
   /**
+   * @var array $args
+   *   Array of parameters pass to the script.
+   */
+  protected $args = array();
+
+  /**
+   * @var array $exts
+   *   Array of extensions allowed to download.
+   */
+  protected $exts = array();
+
+  /**
    * Constructor
    *
-   * @param string $userName.
-   *   User name.
+   * @param array $args
+   *   Array of parameters pass to the script.
    *
-   * @param string $userPassword.
-   *   User password.
-   *
-   * @param boolean $passwordHashed
-   *   Indicates whether given password is already md5-ed.
    */
-  public function __construct ($userName, $userPassword, $passwordHashed = FALSE) {
-    $this->userName         = $userName;
+  public function __construct ($args) {
+    $this->args             = $args;
+    $this->userName         = $args['user'];
+    $userPassword           = !empty($args['hash']) ? $args['hash'] : $args['password']; // Chomikuj user password or MD5-hashed password.
+    $passwordHashed         = !empty($args['hash']); // Boolean indicating whether specified password is a MD5 version of password(used to prevent showin password in plain text).
     $this->userPasswordHash = $passwordHashed ? $userPassword : strtolower(md5($userPassword));
+    $this->exts             = isset($args['ext']) ? (explode(',', $args['ext'])) : array();
+
   }
 
   /**
@@ -208,7 +212,7 @@ class Chomikuj
   public function downloadFilesInformation ($urls, $recursive = TRUE) {
 
     if (!$this->login())
-    // Cannot login, nothing to do.
+      // Cannot login, nothing to do.
       return FALSE;
 
     if (php_sapi_name() === 'cli') {
@@ -310,20 +314,36 @@ class Chomikuj
 
     $numMatches = count ($matches[1]);
 
-    if (php_sapi_name() === 'cli') {
-      echo "  Received $numMatches records with information about files.\n";
-    }
+    php_sapi_name() === 'cli' ? print "  Received $numMatches records with information about files.\n" : NULL;
 
     for ($i = 0; $i < $numMatches; ++$i) {
+      $name =  $matches[5][$i];
+      $size = $matches[6][$i];
+      $ext  = pathinfo($name, PATHINFO_EXTENSION);
+
+      if (!empty($this->exts) && !in_array($ext, $this->exts)) {
+        php_sapi_name() === 'cli' ? print "Skipping file ($name), because of extension ($ext).\n" : NULL;
+        // Skipping file.
+        continue;
+      }
+
+      if (!empty($this->args['max-size']) && $size > $this->args['max-size']) {
+        // Skipping file.
+        php_sapi_name() === 'cli' ? print "Skipping file ($name), because of size limit ($size).\n" : NULL;
+        continue;
+      }
+
       $filesInfo[] = $this->fileInfoCache[$matches[1][$i]] = array(
         'id' => $matches[1][$i],
         'agreement' => $matches[2][$i],
         'cost' => $matches[3][$i],
         'realId' => $matches[4][$i],
-        'name' => $matches[5][$i],
-        'size' => $matches[6][$i],
+        'name' => $name,
+        'size' => $size,
       );
     }
+    $totalFiles = count($filesInfo);
+    php_sapi_name() === 'cli' ? print "  Total of $totalFiles files added to download queue.\n" : NULL;
 
     return $filesInfo;
   }
@@ -334,9 +354,6 @@ class Chomikuj
    * @param string $urls
    *   List of file URLs.
    *
-   * @param array $extensions
-   *   List of file extensions to download. Leave empty to download all files.
-   *
    * @param boolean $recursive
    *   True to download also subfolders.
    *
@@ -346,13 +363,10 @@ class Chomikuj
    * @param boolean $overwrite
    *   True to overwrite existing files.
    *
-   * @param array $args
-   *   Pass original arguments.
-   *
    * @return boolean
    *   True if sucessfully downloaded all files.
    */
-  public function downloadFiles ($urls, $extensions = array(), $destinationFolder = '', $recursive = TRUE, $structure = TRUE, $overwrite = FALSE, $args = array()) {
+  public function downloadFiles ($urls, $destinationFolder = '', $recursive = TRUE, $structure = TRUE, $overwrite = FALSE) {
 
     if (empty($urls))
     // Nothing to do.
@@ -471,13 +485,13 @@ class Chomikuj
         $ext        = pathinfo($name, PATHINFO_EXTENSION);
         $size       = $matches[4][$i];
 
-        if (!empty($extensions) && !in_array($ext, $extensions)) {
+        if (!empty($this->exts) && !in_array($ext, $this->exts)) {
           php_sapi_name() === 'cli' ? print "Skipping file ($name), because of extension ($ext).\n" : NULL;
           // Skipping file.
           continue;
         }
-        
-        if (!empty($args['max-size']) && $size > $args['max-size']) {
+
+        if (!empty($this->args['max-size']) && $size > $this->args['max-size']) {
           // Skipping file.
           php_sapi_name() === 'cli' ? print "Skipping file ($name), because of size limit ($size).\n" : NULL;
           continue;
@@ -512,9 +526,7 @@ class Chomikuj
       foreach ($files as $file) {
 
         if (php_sapi_name() === 'cli') {
-
           $url_limited = strlen($file['url']) > 80 ? (substr($file['url'], 0, 20) . '...' . substr($file['url'], -60)) : $file['url'];
-
           echo "Downloading URL \"{$url_limited}\" ({$file['size']} bytes). ";
         }
 
@@ -526,9 +538,7 @@ class Chomikuj
 
         if (file_exists($file['destination'])) {
 
-          if ($structure && !$overwrite) {
-            // Creating new file has no sense.
-
+          if ($structure && !$overwrite) { // Creating new file has no sense, so skipping it.
             if (php_sapi_name() === 'cli') {
               echo "Already downloaded, skipping.\n";
             }
@@ -543,48 +553,34 @@ class Chomikuj
               echo "Will Overwrite. ";
 
             unlink($file['destination']);
-          }
-          else {
+          } else {
             // Generating better name.
             $path = $file['destination'];
 
             do {
               $file_name = pathinfo($path, PATHINFO_FILENAME);
-
               preg_match('/\((\d+)\)$/', $file_name, $matches);
 
               if (@is_numeric($matches[1])) {
-                // Incrementing value in "(...)".
-                $number = $matches[1] + 1;
-
-                // Removing "(...)" from the end of file name.
-                $file_name = substr($file_name, 0, strlen($file_name) - strlen($number) - 2);
-              }
-              else {
+                $number = $matches[1] + 1; // Incrementing value in "(...)".
+                $file_name = substr($file_name, 0, strlen($file_name) - strlen($number) - 2); // Removing "(...)" from the end of file name.
+              } else {
                 // Starting from "...(2)".
                 $number = 2;
               }
 
               $ext  = pathinfo($path, PATHINFO_EXTENSION);
-
-              // Constructing file path as "filename(NUMBER).ext".
-              $path =
-                pathinfo($path, PATHINFO_DIRNAME) . '/' .
-                $file_name . '(' . $number . ')' .
-                ($ext ? ('.' . $ext) : '');
+              $path = pathinfo($path, PATHINFO_DIRNAME) . '/' .  $file_name . '(' . $number . ')' .  ($ext ? ('.' . $ext) : ''); // Constructing file path as "filename(NUMBER).ext".
 
               // If file path already exist, we will need to generate another path.
             } while (file_exists($path));
-
             $file['destination'] = $path;
           }
         }
 
-        if (file_exists($file['destination'] . '.part')) {
-          // File is not complete.
+        if (file_exists($file['destination'] . '.part')) { // File is not complete.
 
           $fileSize = filesize($file['destination'] . '.part');
-
           if ($fileSize < $file['size']) {
             // Destination file already exist and is not fully downloaded, resuming download.
             curl_setopt($curl, CURLOPT_RANGE, $fileSize . "-");
@@ -593,8 +589,7 @@ class Chomikuj
               echo "Resuming part $fileSize - {$file['size']}... ";
 
             $fileHandle = fopen($file['destination'] . '.part', "a");
-          }
-          else {
+          } else {
             // Destination file is already fully downloaded, renaming and going to the next file.
 
             if (php_sapi_name() === 'cli')
@@ -605,8 +600,7 @@ class Chomikuj
 
             continue;
           }
-        }
-        else {
+        } else {
           // Starting download.
           curl_setopt($curl, CURLOPT_RANGE, '0-');
 
@@ -630,14 +624,12 @@ class Chomikuj
 
         $result    = curl_exec($curl);
         $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-
         fclose ($fileHandle);
 
         if ($http_code == 404) {
           // We don't need zero-sized file.
           unlink($file['destination']);
-        }
-        else {
+        } else {
           // Removing ".part" from file name.
           rename($file['destination'] . '.part', $file['destination']);
         }
@@ -671,7 +663,7 @@ class Chomikuj
           }
 
           // Downloading subfolders' files.
-          $this->downloadFiles($matches[1], $extensions, $destinationFolder, $recursive, $structure, $overwrite);
+          $this->downloadFiles($matches[1], $destinationFolder, $recursive, $structure, $overwrite);
         }
       }
     }
@@ -804,24 +796,11 @@ if (php_sapi_name() === 'cli') {
   // No destination folder.
     $args[0] = './';
 
-  $chomikuj = new Chomikuj(
-    // Chomikuj user name.
-    $args['user'],
-
-    // Chomikuj user password or MD5-hashed password.
-    !empty($args['hash']) ? $args['hash'] : $args['password'],
-
-    // Boolean indicating whether specified password is a MD5 version of password(used to prevent showin password in
-    // plain text).
-    !empty($args['hash'])
-  );
+  $chomikuj = new Chomikuj($args);
 
   $chomikuj->downloadFiles(
     // List of URLs. Single URL accepted.
     array($args['url']),
-
-    // File extensions to include.
-    isset($args['ext']) ? (explode(',', $args['ext'])) : array(),
 
     // Destination folder.
     $args[0],
