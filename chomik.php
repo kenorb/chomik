@@ -40,6 +40,9 @@
  *     // Optional. Will not overwrite existing files. Defaults to FALSE.
  *     FALSE,
  *
+ *     // Optional. Will not print download progress.
+ *     TRUE,
+ *
  *   );
  * ?>
  * </code>
@@ -363,10 +366,13 @@ class Chomikuj
    * @param boolean $overwrite
    *   True to overwrite existing files.
    *
+   * @param boolean $noprogress
+   *   Do not print progress
+   *
    * @return boolean
    *   True if sucessfully downloaded all files.
    */
-  public function downloadFiles ($urls, $destinationFolder = '', $recursive = TRUE, $structure = TRUE, $overwrite = FALSE) {
+  public function downloadFiles ($urls, $destinationFolder = '', $recursive = TRUE, $structure = TRUE, $overwrite = FALSE, $noprogress = FALSE) {
 
     if (empty($urls))
     // Nothing to do.
@@ -621,6 +627,9 @@ class Chomikuj
 
         curl_setopt($curl, CURLOPT_BINARYTRANSFER, 1);
         curl_setopt($curl, CURLOPT_FILE, $fileHandle);
+        if (!$noprogress) {
+            curl_setopt($curl, CURLOPT_NOPROGRESS, 0);
+        }
 
         $result    = curl_exec($curl);
         $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
@@ -757,6 +766,9 @@ if (php_sapi_name() === 'cli') {
   if (empty($args['overwrite']))
     $args['overwrite'] = isset($args['o']) ? $args['o'] : FALSE;
 
+  if (empty($args['noprogress']))
+    $args['noprogress'] = isset($args['n']) ? $args['n'] : FALSE;
+
   if (empty($args['help']))
     $args['help']      = isset($args['h']) ? $args['h'] : FALSE;
 
@@ -777,6 +789,7 @@ if (php_sapi_name() === 'cli') {
       "  -r, --recursive      Downloads also all subdirectories.\n" .
       "  -s, --structure      Creates full folder structure.\n" .
       "  -o, --overwrite      Overwrites existing files.\n" .
+      "  -n, --noprogress     Do not print progress.\n" .
       "  --ext=EXTENSIONS     Downloads files only with the specified extensions, separated by comma.\n" .
       "  --max-limit=SIZE     Do not download files with size greater than specified max (in bytes).\n" .
       "  -h, --help, /?       Shows this help.\n\n" .
@@ -813,6 +826,9 @@ if (php_sapi_name() === 'cli') {
 
     // Overwrite existing files.
     !empty($args['overwrite']),
+
+    // Do not print progress
+    !empty($args['noprogress']),
 
     // Pass original arguments.
     $args
